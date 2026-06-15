@@ -943,13 +943,5 @@ def sauvegarder_modification(n, user_id, nom, prenom,
 # DÉMARRAGE
 # ═════════════════════════════════════════════════════════
 if __name__ == '__main__':
-    print("=" * 45)
-    print("  EduReco — Dashboard Dash")
-    print("=" * 45)
-    print("  Dashboard → http://127.0.0.1:5000")
-    print("  API       → http://127.0.0.1:5001")
-    print("  ⚠️  Lancer api.py en parallèle !")
-    print("  Ctrl+C pour arrêter")
-    print("=" * 45)
     port = int(os.getenv("PORT", 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
