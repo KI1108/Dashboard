@@ -1,34 +1,15 @@
-
-
-
-
-
 # dashboard.py
 # ============================================================
-# RÔLE : Interface utilisateur — 100% Python avec Dash
-#
-# Pages :
-#   - Accueil        → choix créer ou se connecter
-#   - Inscription    → formulaire création profil
-#   - Connexion      → connexion par email
-#   - Résultats      → formations + bourses recommandées
-#   - Modifier profil → mise à jour du profil
-#
-# ⚠️  L'API doit tourner en parallèle :
-#      python api.py  (port 5001)
-#
-# LANCER : python dashboard.py
-# ACCÈS  : http://127.0.0.1:5000
-#
-# Dépendances :
-#   pip install dash dash-bootstrap-components requests
+# EduReco — Dashboard utilisateur Dash
+# Version corrigée pour déploiement local + Render
 # ============================================================
 
+import os
 import dash
 from dash import html, dcc, Input, Output, State
 import dash_bootstrap_components as dbc
 import requests
-import os 
+
 # ─────────────────────────────────────────────────────────
 # INITIALISATION
 # ─────────────────────────────────────────────────────────
@@ -38,77 +19,115 @@ app = dash.Dash(
     suppress_callback_exceptions=True
 )
 app.title = "EduReco — Formations & Bourses"
-server = app.server 
-# for local
-# API_URL = "http://127.0.0.1:5001" 
+server = app.server
+
+API_URL = os.getenv("API_URL", "http://127.0.0.1:5001").rstrip("/")
 
 
-# for production
-API_URL = os.getenv("API_URL", "http://127.0.0.1:5001")
+# ─────────────────────────────────────────────────────────
+# HELPERS API
+# ─────────────────────────────────────────────────────────
+def api_get(path, timeout=30):
+    url = f"{API_URL}{path}"
+    r = requests.get(url, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_post(path, payload, timeout=30):
+    url = f"{API_URL}{path}"
+    r = requests.post(url, json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def api_put(path, payload, timeout=30):
+    url = f"{API_URL}{path}"
+    r = requests.put(url, json=payload, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def erreur_api_message(err):
+    if isinstance(err, requests.exceptions.ConnectionError):
+        return dbc.Alert(
+            f"❌ Impossible de joindre l'API distante : {API_URL}",
+            color="danger"
+        )
+    if isinstance(err, requests.exceptions.Timeout):
+        return dbc.Alert(
+            f"⏱️ L'API ne répond pas à temps : {API_URL}",
+            color="warning"
+        )
+    if isinstance(err, requests.exceptions.HTTPError):
+        return dbc.Alert(
+            f"❌ Erreur HTTP API : {err}",
+            color="danger"
+        )
+    return dbc.Alert(
+        f"❌ Erreur inattendue : {err}",
+        color="danger"
+    )
 
 
 # ═════════════════════════════════════════════════════════
 # DONNÉES PARTAGÉES
 # ═════════════════════════════════════════════════════════
-
 PAYS_OPTIONS = [
-    {"label": "Sénégal",       "value": "Senegal"},
-    {"label": "Guinée",        "value": "Guinea"},
-    {"label": "Mali",          "value": "Mali"},
+    {"label": "Sénégal", "value": "Senegal"},
+    {"label": "Guinée", "value": "Guinea"},
+    {"label": "Mali", "value": "Mali"},
     {"label": "Côte d'Ivoire", "value": "Cote d'Ivoire"},
-    {"label": "Burkina Faso",  "value": "Burkina Faso"},
-    {"label": "Cameroun",      "value": "Cameroun"},
-    {"label": "Maroc",         "value": "Maroc"},
-    {"label": "France",        "value": "France"},
-    {"label": "Autre",         "value": "Autre"},
+    {"label": "Burkina Faso", "value": "Burkina Faso"},
+    {"label": "Cameroun", "value": "Cameroun"},
+    {"label": "Maroc", "value": "Maroc"},
+    {"label": "France", "value": "France"},
+    {"label": "Autre", "value": "Autre"},
 ]
 
 NIVEAU_OPTIONS = [
     {"label": "Lycée / Bac", "value": "lycee"},
-    {"label": "Licence",     "value": "licence"},
-    {"label": "Master",      "value": "master"},
-    {"label": "Doctorat",    "value": "doctorat"},
+    {"label": "Licence", "value": "licence"},
+    {"label": "Master", "value": "master"},
+    {"label": "Doctorat", "value": "doctorat"},
 ]
 
 DOMAINE_OPTIONS = [
     {"label": "Informatique / Data Science", "value": "informatique"},
-    {"label": "Ingénierie",                  "value": "ingenierie"},
-    {"label": "Économie / Finance",          "value": "economie"},
-    {"label": "Droit",                       "value": "droit"},
-    {"label": "Médecine / Santé",            "value": "medecine"},
-    {"label": "Sciences",                    "value": "science"},
-    {"label": "Éducation",                   "value": "education"},
-    {"label": "Arts / Lettres",              "value": "arts"},
+    {"label": "Ingénierie", "value": "ingenierie"},
+    {"label": "Économie / Finance", "value": "economie"},
+    {"label": "Droit", "value": "droit"},
+    {"label": "Médecine / Santé", "value": "medecine"},
+    {"label": "Sciences", "value": "science"},
+    {"label": "Éducation", "value": "education"},
+    {"label": "Arts / Lettres", "value": "arts"},
 ]
 
 OBJECTIF_OPTIONS = [
-    {"label": "Trouver un emploi",     "value": "emploi"},
+    {"label": "Trouver un emploi", "value": "emploi"},
     {"label": "Faire de la recherche", "value": "recherche"},
-    {"label": "Créer une entreprise",  "value": "entrepreneuriat"},
-    {"label": "Formation continue",    "value": "continue"},
+    {"label": "Créer une entreprise", "value": "entrepreneuriat"},
+    {"label": "Formation continue", "value": "continue"},
 ]
 
 LANGUE_OPTIONS = [
     {"label": "Français", "value": "francais"},
-    {"label": "Anglais",  "value": "anglais"},
-    {"label": "Arabe",    "value": "arabe"},
+    {"label": "Anglais", "value": "anglais"},
+    {"label": "Arabe", "value": "arabe"},
 ]
 
 
 # ═════════════════════════════════════════════════════════
-# FONCTIONS DE PAGE
+# PAGES
 # ═════════════════════════════════════════════════════════
-
 def page_accueil():
-    """Page d'accueil — choix entre créer un profil ou se connecter."""
     return dbc.Row([
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
                     html.H2("🎓 EduReco", className="text-center mb-2"),
                     html.P(
-                        "Trouvez les formations et bourses qui correspondent "
-                        "à votre profil grâce à l'intelligence artificielle.",
+                        "Trouvez les formations et bourses qui correspondent à votre profil grâce à l'intelligence artificielle.",
                         className="text-center text-muted mb-4"
                     ),
                     dbc.Row([
@@ -138,13 +157,12 @@ def page_accueil():
 
 
 def page_inscription():
-    """Formulaire de création de profil."""
     return dbc.Row([
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader([
                     dbc.Row([
-                        dbc.Col(html.H4(" Créer mon profil")),
+                        dbc.Col(html.H4("Créer mon profil")),
                         dbc.Col(
                             dbc.Button(
                                 "← Accueil",
@@ -157,7 +175,6 @@ def page_inscription():
                     ])
                 ]),
                 dbc.CardBody([
-
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Nom *"),
@@ -181,7 +198,6 @@ def page_inscription():
                     dbc.Select(
                         id="inp-pays",
                         options=PAYS_OPTIONS,
-                        placeholder="Choisir un pays",
                         className="mb-3"
                     ),
 
@@ -190,16 +206,14 @@ def page_inscription():
                             dbc.Label("Niveau d'études *"),
                             dbc.Select(
                                 id="inp-niveau",
-                                options=NIVEAU_OPTIONS,
-                                placeholder="Choisir un niveau"
+                                options=NIVEAU_OPTIONS
                             )
                         ]),
                         dbc.Col([
                             dbc.Label("Domaine *"),
                             dbc.Select(
                                 id="inp-domaine",
-                                options=DOMAINE_OPTIONS,
-                                placeholder="Choisir un domaine"
+                                options=DOMAINE_OPTIONS
                             )
                         ])
                     ], className="mb-3"),
@@ -232,7 +246,6 @@ def page_inscription():
                     ),
 
                     html.Div(id="msg-inscription", className="mt-3")
-
                 ])
             ], className="shadow")
         ], width=8, className="mx-auto mt-3")
@@ -240,7 +253,6 @@ def page_inscription():
 
 
 def page_connexion():
-    """Formulaire de connexion par email."""
     return dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -280,16 +292,11 @@ def page_connexion():
     ])
 
 
-# ═════════════════════════════════════════════════════════
-# CARTES
-# ═════════════════════════════════════════════════════════
-
 def carte_formation(f):
-    """Carte d'affichage d'une formation recommandée."""
-    # Couleur selon le score de correspondance
-    if f['pct'] >= 40:
+    pct = f.get("pct", 0)
+    if pct >= 40:
         couleur = "success"
-    elif f['pct'] >= 25:
+    elif pct >= 25:
         couleur = "warning"
     else:
         couleur = "secondary"
@@ -298,60 +305,43 @@ def carte_formation(f):
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
-                    html.H5(f['titre'], className="card-title"),
+                    html.H5(f.get("titre", ""), className="card-title"),
                     html.P([
+                        dbc.Badge(f.get("domaine", ""), color="primary", className="me-1"),
+                        dbc.Badge(f.get("niveau_requis", ""), color="info", className="me-1"),
                         dbc.Badge(
-                            f.get('domaine', ''),
-                            color="primary",
-                            className="me-1"
-                        ),
-                        dbc.Badge(
-                            f.get('niveau_requis', ''),
-                            color="info",
-                            className="me-1"
-                        ),
-                        dbc.Badge(
-                            "Gratuit" if f.get('est_gratuit') else "Payant",
-                            
-                            color="success" if f.get('est_gratuit') else "secondary",
+                            "Gratuit" if f.get("est_gratuit") else "Payant",
+                            color="success" if f.get("est_gratuit") else "secondary",
                             className="me-1"
                         ),
                     ]),
-                    html.P(f.get('organisme', ''), className="text-muted small")
+                    html.P(f.get("organisme", ""), className="text-muted small")
                 ], width=9),
-
-                # Score de correspondance NLP
                 dbc.Col([
                     html.H3(
-                        f"{f['pct']}%",
+                        f"{pct}%",
                         className=f"text-{couleur} text-center fw-bold"
                     ),
-                  
-                    html.P(
-                        "Correspondance",
-                        className="text-center small text-muted"
-                    )
+                    html.P("Correspondance", className="text-center small text-muted")
                 ], width=3)
             ]),
-            # Lien vers la formation
             html.A(
                 "Voir la formation →",
-                href=f.get('lien', '#'),
+                href=f.get("lien", "#"),
                 target="_blank",
+                rel="noopener noreferrer",
                 role="button",
                 className="btn btn-outline-primary btn-sm mt-1"
-            ) if f.get('lien') else html.Span()
+            ) if f.get("lien") else html.Span()
         ])
-   
     ], className="mb-3 shadow-sm")
 
 
 def carte_bourse(b):
-    """Carte d'affichage d'une bourse recommandée."""
-    # Couleur selon le score de correspondance
-    if b['pct'] >= 40:
+    pct = b.get("pct", 0)
+    if pct >= 40:
         couleur = "success"
-    elif b['pct'] >= 25:
+    elif pct >= 25:
         couleur = "warning"
     else:
         couleur = "secondary"
@@ -360,72 +350,44 @@ def carte_bourse(b):
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
-                    html.H5(b['titre'], className="card-title"),
+                    html.H5(b.get("titre", ""), className="card-title"),
                     html.P([
-                        dbc.Badge(
-                            b.get('organisme', ''),
-                            color="danger",
-                            className="me-1"
-                        ),
-                        dbc.Badge(
-                            b.get('niveau_requis', ''),
-                            color="info",
-                          
-                            className="me-1"
-                        ),
-                        dbc.Badge(
-                            b.get('pays_eligible', 'Tous pays'),
-                            color="warning",
-                         
-                            className="me-1"
-                        ),
+                        dbc.Badge(b.get("organisme", ""), color="danger", className="me-1"),
+                        dbc.Badge(b.get("niveau_requis", ""), color="info", className="me-1"),
+                        dbc.Badge(b.get("pays_eligible", "Tous pays"), color="warning", className="me-1"),
                     ]),
-                    html.P(b.get('montant', ''), className="text-success fw-bold")
+                    html.P(b.get("montant", ""), className="text-success fw-bold")
                 ], width=9),
-
-                # Score de correspondance NLP
                 dbc.Col([
                     html.H3(
-                        f"{b['pct']}%",
+                        f"{pct}%",
                         className=f"text-{couleur} text-center fw-bold"
                     ),
-                    
-                    html.P(
-                        "Correspondance",
-                        className="text-center small text-muted"
-                    )
+                    html.P("Correspondance", className="text-center small text-muted")
                 ], width=3)
             ]),
-            # Lien vers la bourse
             html.A(
                 "Voir la bourse →",
-                href=b.get('lien', '#'),
+                href=b.get("lien", "#"),
                 target="_blank",
+                rel="noopener noreferrer",
                 role="button",
                 className="btn btn-outline-danger btn-sm mt-1"
-            ) if b.get('lien') else html.Span()
+            ) if b.get("lien") else html.Span()
         ])
-    
     ], className="mb-3 shadow-sm")
 
-# ***************************************************************************************************
-# ═════════════════════════════════════════════════════════
-# PAGE RÉSULTATS
-# ═════════════════════════════════════════════════════════
 
 def page_resultats(user, formations, bourses, texte_profil):
-    """Page d'affichage des recommandations NLP."""
     return html.Div([
-
-        # Bandeau de bienvenue avec infos profil
         dbc.Alert([
             dbc.Row([
                 dbc.Col([
-                    html.H4(f"Bonjour {user['prenom']} {user['nom']} 👋"),
+                    html.H4(f"Bonjour {user.get('prenom', '')} {user.get('nom', '')} 👋"),
                     html.P([
                         html.Strong("Profil analysé : "),
-                        html.Em(texte_profil)
-                    ], className="mb-0")   
+                        html.Em(texte_profil or "")
+                    ], className="mb-0")
                 ], width=9),
                 dbc.Col([
                     dbc.Button(
@@ -441,45 +403,34 @@ def page_resultats(user, formations, bourses, texte_profil):
                         color="outline-light",
                         size="sm"
                     )
-                ], width=3),
-          
-            ], className="d-flex align-items-center justify-content-end")
+                ], width=3, className="text-end")
+            ], className="align-items-center")
         ], color="info"),
 
-        # ✅ CORRIGÉ : dcc.store → dcc.Store  |  i= → id=
         dcc.Store(id="store-user", data=user),
         html.Hr(),
 
-       
         dbc.Row([
             dbc.Col([
                 html.H4(f"🎓 Formations recommandées ({len(formations)})"),
-                html.Div([
-                    carte_formation(f) for f in formations
-                ] if formations else [
-                    dbc.Alert("Aucune formation trouvée.", color="warning")
-                ])
+                html.Div(
+                    [carte_formation(f) for f in formations]
+                    if formations else [dbc.Alert("Aucune formation trouvée.", color="warning")]
+                )
             ], width=6),
 
             dbc.Col([
                 html.H4(f"💵 Bourses recommandées ({len(bourses)})"),
-                html.Div([
-                    carte_bourse(b) for b in bourses
-            
-                ] if bourses else [
-                    dbc.Alert("Aucune bourse trouvée.", color="warning")
-                ])
+                html.Div(
+                    [carte_bourse(b) for b in bourses]
+                    if bourses else [dbc.Alert("Aucune bourse trouvée.", color="warning")]
+                )
             ], width=6),
         ])
-
-  
     ])
 
-# *******************************************************************************************
-# Modification fonction
-# *******************************************************************************************
+
 def page_modifier_profil(user):
-    """Formulaire de modofication du profil de user"""
     return dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -493,35 +444,33 @@ def page_modifier_profil(user):
                                 color="outline-secondary",
                                 size="sm"
                             ),
-                            class_name="text-end"
+                            className="text-end"
                         )
                     ])
                 ]),
                 dbc.CardBody([
-                    # Email non modifiable-afficher en lecteur seule
                     dbc.Alert([
-                        html.Strong("Email(non modifiable) :"),
-                        html.Span((user.get('email', '')))
-                    ], color="light", class_name="mb-3"),
+                        html.Strong("Email (non modifiable) : "),
+                        html.Span(user.get("email", ""))
+                    ], color="light", className="mb-3"),
 
                     dbc.Row([
                         dbc.Col([
-                        dbc.Label("nom"),
-                        dbc.Input(id="mod-nom", value=user.get('nom', ''))
+                            dbc.Label("Nom"),
+                            dbc.Input(id="mod-nom", value=user.get("nom", ""))
                         ]),
-
                         dbc.Col([
-                            dbc.Label("prenom"),
-                            dbc.Input(id="mod-prenom", value=user.get('prenom', ''))
-                        ]) 
-                    ],class_name="mb-3"),
+                            dbc.Label("Prénom"),
+                            dbc.Input(id="mod-prenom", value=user.get("prenom", ""))
+                        ])
+                    ], className="mb-3"),
 
                     dbc.Label("Pays"),
                     dbc.Select(
                         id="mod-pays",
-                        value=user.get('pays', ''),
+                        value=user.get("pays", ""),
                         options=PAYS_OPTIONS,
-                        class_name="mb-3"
+                        className="mb-3"
                     ),
 
                     dbc.Row([
@@ -529,28 +478,26 @@ def page_modifier_profil(user):
                             dbc.Label("Niveau d'études"),
                             dbc.Select(
                                 id="mod-niveau",
-                                value=user.get('niveau_etudes', ''),
+                                value=user.get("niveau_etudes", ""),
                                 options=NIVEAU_OPTIONS
                             )
                         ]),
-
                         dbc.Col([
                             dbc.Label("Domaine"),
                             dbc.Select(
                                 id="mod-domaine",
-                                value=user.get('domaine', ''),
+                                value=user.get("domaine", ""),
                                 options=DOMAINE_OPTIONS
                             )
-
                         ])
-                    ],class_name="mb-3"),
+                    ], className="mb-3"),
 
                     dbc.Row([
                         dbc.Col([
                             dbc.Label("Objectif"),
                             dbc.Select(
                                 id="mod-objectif",
-                                value=user.get('objectif', 'emploi'),
+                                value=user.get("objectif", "emploi"),
                                 options=OBJECTIF_OPTIONS
                             )
                         ]),
@@ -558,65 +505,53 @@ def page_modifier_profil(user):
                             dbc.Label("Langue"),
                             dbc.Select(
                                 id="mod-langue",
-                                value=user.get('langue', 'français'),
+                                value=user.get("langue", "francais"),
                                 options=LANGUE_OPTIONS
                             )
                         ])
-                    ], class_name="mb-4"),
+                    ], className="mb-4"),
 
-                    # stocker l'ID pour le callback de sauvegarde
-                    dcc.Store(id="mod-user-id", data=user.get('id')),
+                    dcc.Store(id="mod-user-id", data=user.get("id")),
 
                     dbc.Button(
-                    "💾 Sauvegarder et voir mes nouvelles recommendations ",
-                    id="btn-sauvegarder-profil",
-                    color="success",
-                    size="lg",
-                    className="w-100"
+                        "💾 Sauvegarder et voir mes nouvelles recommandations",
+                        id="btn-sauvegarder-profil",
+                        color="success",
+                        size="lg",
+                        className="w-100"
                     ),
 
                     html.Div(id="msg-modification", className="mt-3")
-                    
                 ])
-            ], class_name="shadow")
-        ], width=8, class_name="mx-auto mt-3")
+            ], className="shadow")
+        ], width=8, className="mx-auto mt-3")
     ])
 
 
-
-
-
 # ═════════════════════════════════════════════════════════
-# LAYOUT PRINCIPAL
+# LAYOUT
 # ═════════════════════════════════════════════════════════
 app.layout = dbc.Container([
-
     dbc.NavbarSimple(
         brand="🎓 EduReco",
         color="primary",
         dark=True,
         className="mb-4"
     ),
-
-    html.Div(id="contenu-principal", children=page_accueil()),
-
+    html.Div(id="contenu-principal", children=page_accueil())
 ], fluid=True)
 
-# # Les call back
 
 # ═════════════════════════════════════════════════════════
-# CALLBACKS DE NAVIGATION
+# CALLBACKS NAVIGATION
 # ═════════════════════════════════════════════════════════
-
 @app.callback(
     Output("contenu-principal", "children", allow_duplicate=True),
     Input("btn-vers-inscription", "n_clicks"),
     prevent_initial_call=True
 )
 def aller_inscription(n):
-    if n:
-        return page_inscription()
-    return dash.no_update
+    return page_inscription() if n else dash.no_update
 
 
 @app.callback(
@@ -625,9 +560,7 @@ def aller_inscription(n):
     prevent_initial_call=True
 )
 def aller_connexion(n):
-    if n:
-        return page_connexion()
-    return dash.no_update
+    return page_connexion() if n else dash.no_update
 
 
 @app.callback(
@@ -636,9 +569,7 @@ def aller_connexion(n):
     prevent_initial_call=True
 )
 def retour_depuis_inscription(n):
-    if n:
-        return page_accueil()
-    return dash.no_update
+    return page_accueil() if n else dash.no_update
 
 
 @app.callback(
@@ -647,9 +578,7 @@ def retour_depuis_inscription(n):
     prevent_initial_call=True
 )
 def retour_depuis_connexion(n):
-    if n:
-        return page_accueil()
-    return dash.no_update
+    return page_accueil() if n else dash.no_update
 
 
 @app.callback(
@@ -658,9 +587,7 @@ def retour_depuis_connexion(n):
     prevent_initial_call=True
 )
 def retour_depuis_resultats(n):
-    if n:
-        return page_accueil()
-    return dash.no_update
+    return page_accueil() if n else dash.no_update
 
 
 @app.callback(
@@ -669,9 +596,7 @@ def retour_depuis_resultats(n):
     prevent_initial_call=True
 )
 def retour_depuis_modif(n):
-    if n:
-        return page_accueil()
-    return dash.no_update
+    return page_accueil() if n else dash.no_update
 
 
 @app.callback(
@@ -687,117 +612,81 @@ def aller_modifier(n, user):
 
 
 # ═════════════════════════════════════════════════════════
-# CALLBACK INSCRIPTION
-# 1. Valider les champs obligatoires
-# 2. POST /api/users → créer le profil
-# 3. GET /api/recommendations/{id} → générer les reco NLP
-# 4. Afficher la page résultats
+# INSCRIPTION
 # ═════════════════════════════════════════════════════════
-
 @app.callback(
     [
-        Output("msg-inscription",   "children"),
+        Output("msg-inscription", "children"),
         Output("contenu-principal", "children", allow_duplicate=True)
     ],
     Input("btn-soumettre-inscription", "n_clicks"),
     [
-        State("inp-nom",      "value"),
-        State("inp-prenom",   "value"),
-        State("inp-email",    "value"),
-        State("inp-pays",     "value"),
-        State("inp-niveau",   "value"),
-        State("inp-domaine",  "value"),
+        State("inp-nom", "value"),
+        State("inp-prenom", "value"),
+        State("inp-email", "value"),
+        State("inp-pays", "value"),
+        State("inp-niveau", "value"),
+        State("inp-domaine", "value"),
         State("inp-objectif", "value"),
-        State("inp-langue",   "value"),
+        State("inp-langue", "value"),
     ],
     prevent_initial_call=True
 )
-def soumettre_inscription(n, nom, prenom, email,
-                          pays, niveau, domaine, objectif, langue):
+def soumettre_inscription(n, nom, prenom, email, pays, niveau, domaine, objectif, langue):
     if not n:
         return "", dash.no_update
 
-    # Validation des champs obligatoires
-    champs = {"Nom": nom, "Prénom": prenom, "Email": email,
-              "Pays": pays, "Niveau": niveau, "Domaine": domaine}
+    champs = {
+        "Nom": nom,
+        "Prénom": prenom,
+        "Email": email,
+        "Pays": pays,
+        "Niveau": niveau,
+        "Domaine": domaine
+    }
     for label, val in champs.items():
         if not val:
-            return dbc.Alert(
-                f"⚠️ Le champ '{label}' est obligatoire.",
-                color="danger"
-            ), dash.no_update
+            return dbc.Alert(f"⚠️ Le champ '{label}' est obligatoire.", color="danger"), dash.no_update
 
     try:
-        # Étape 1 : créer l'utilisateur
-        rep = requests.post(
-            f"{API_URL}/api/users",
-            json={
-                "nom":           nom,
-                "prenom":        prenom,
-                "email":         email,
-                "pays":          pays,
-                "niveau_etudes": niveau,
-                "domaine":       domaine,
-                "objectif":      objectif or "emploi",
-                "langue":        langue   or "francais",
-            },
-            timeout=30
-        )
-        data = rep.json()
+        data = api_post("/api/users", {
+            "nom": nom,
+            "prenom": prenom,
+            "email": email.strip().lower(),
+            "pays": pays,
+            "niveau_etudes": niveau,
+            "domaine": domaine,
+            "objectif": objectif or "emploi",
+            "langue": langue or "francais",
+        })
 
-        if not data['succes']:
-            return dbc.Alert(f"❌ {data['erreur']}", color="danger"), dash.no_update
+        if not data.get("succes"):
+            return dbc.Alert(f"❌ {data.get('erreur', 'Erreur inconnue')}", color="danger"), dash.no_update
 
-        user_id = data['utilisateur']['id']
+        user_id = data["utilisateur"]["id"]
 
-        # Étape 2 : générer les recommendations NLP
-        rep_reco = requests.get(
-            f"{API_URL}/api/recommendations/{user_id}",
-            timeout=30
-        )
-        data_reco = rep_reco.json()
+        data_reco = api_get(f"/api/recommendations/{user_id}")
 
-        if not data_reco['succes']:
-            return dbc.Alert(
-                "Profil créé mais erreur lors des recommendations.",
-                color="warning"
-            ), dash.no_update
+        if not data_reco.get("succes"):
+            return dbc.Alert("Profil créé mais erreur lors des recommandations.", color="warning"), dash.no_update
 
-        # Étape 3 : afficher la page résultats
         return "", page_resultats(
-            data_reco['utilisateur'],
-            data_reco['formations'],
-            data_reco['bourses'],
-            data_reco['texte_profil']
+            data_reco["utilisateur"],
+            data_reco["formations"],
+            data_reco["bourses"],
+            data_reco["texte_profil"]
         )
-
-    except requests.exceptions.ConnectionError:
-        return dbc.Alert(
-            "❌ Impossible de joindre l'API. "
-            "Vérifiez que api.py tourne sur le port 5001.",
-            color="danger"
-        ), dash.no_update
-
-    except requests.exceptions.Timeout:
-        return dbc.Alert(
-            "⏱️ L'API met trop de temps à répondre. Réessayez.",
-            color="warning"
-        ), dash.no_update
 
     except Exception as e:
-        return dbc.Alert(f"Erreur : {str(e)}", color="danger"), dash.no_update
+        return erreur_api_message(e), dash.no_update
 
 
 # ═════════════════════════════════════════════════════════
-# CALLBACK CONNEXION
-# 1. POST /api/users/connexion → vérifier l'email
-# 2. GET /api/recommendations/{id} → charger les reco
-# 3. Afficher la page résultats
+# CONNEXION
 # ═════════════════════════════════════════════════════════
-
 @app.callback(
     [
-        Output("msg-connexion",     "children"),
+        Output("msg-connexion", "children"),
         Output("contenu-principal", "children", allow_duplicate=True)
     ],
     Input("btn-soumettre-connexion", "n_clicks"),
@@ -812,136 +701,97 @@ def soumettre_connexion(n, email):
         return dbc.Alert("⚠️ Entrez votre email.", color="warning"), dash.no_update
 
     try:
-        # Étape 1 : connexion
-        rep = requests.post(
-            f"{API_URL}/api/users/connexion",
-            json={"email": email.strip().lower()},
-            timeout=30
-        )
-        data = rep.json()
+        data = api_post("/api/users/connexion", {
+            "email": email.strip().lower()
+        })
 
-        if not data['succes']:
-            return dbc.Alert(f"❌ {data['erreur']}", color="danger"), dash.no_update
+        if not data.get("succes"):
+            return dbc.Alert(f"❌ {data.get('erreur', 'Erreur inconnue')}", color="danger"), dash.no_update
 
-        user_id = data['utilisateur']['id']
+        user_id = data["utilisateur"]["id"]
+        data_reco = api_get(f"/api/recommendations/{user_id}")
 
-        # Étape 2 : recommendations
-        rep_reco = requests.get(
-            f"{API_URL}/api/recommendations/{user_id}",
-            timeout=30
-        )
-        data_reco = rep_reco.json()
+        if not data_reco.get("succes"):
+            return dbc.Alert("Erreur lors du chargement des recommandations.", color="warning"), dash.no_update
 
-        # Étape 3 : afficher les résultats
         return "", page_resultats(
-            data_reco['utilisateur'],
-            data_reco['formations'],
-            data_reco['bourses'],
-            data_reco['texte_profil']
+            data_reco["utilisateur"],
+            data_reco["formations"],
+            data_reco["bourses"],
+            data_reco["texte_profil"]
         )
-
-    except requests.exceptions.ConnectionError:
-        return dbc.Alert(
-            "❌ Impossible de joindre l'API. "
-            "Vérifiez que api.py tourne sur le port 5001.",
-            color="danger"
-        ), dash.no_update
-
-    except requests.exceptions.Timeout:
-        return dbc.Alert(
-            "⏱️ L'API met trop de temps à répondre. Réessayez.",
-            color="warning"
-        ), dash.no_update
 
     except Exception as e:
-        return dbc.Alert(f"Erreur : {str(e)}", color="danger"), dash.no_update
+        return erreur_api_message(e), dash.no_update
 
 
 # ═════════════════════════════════════════════════════════
-# CALLBACK MODIFICATION PROFIL
-# 1. PUT /api/users/{id} → mettre à jour le profil
-# 2. GET /api/recommendations/{id} → nouvelles reco NLP
-# 3. Afficher la page résultats mise à jour
+# MODIFICATION PROFIL
 # ═════════════════════════════════════════════════════════
-
 @app.callback(
     [
-        Output("msg-modification",  "children"),
+        Output("msg-modification", "children"),
         Output("contenu-principal", "children", allow_duplicate=True)
     ],
     Input("btn-sauvegarder-profil", "n_clicks"),
     [
-        State("mod-user-id",  "data"),
-        State("mod-nom",      "value"),
-        State("mod-prenom",   "value"),
-        State("mod-pays",     "value"),
-        State("mod-niveau",   "value"),
-        State("mod-domaine",  "value"),
+        State("mod-user-id", "data"),
+        State("mod-nom", "value"),
+        State("mod-prenom", "value"),
+        State("mod-pays", "value"),
+        State("mod-niveau", "value"),
+        State("mod-domaine", "value"),
         State("mod-objectif", "value"),
-        State("mod-langue",   "value"),
+        State("mod-langue", "value"),
     ],
     prevent_initial_call=True
 )
-def sauvegarder_modification(n, user_id, nom, prenom,
-                              pays, niveau, domaine, objectif, langue):
+def sauvegarder_modification(n, user_id, nom, prenom, pays, niveau, domaine, objectif, langue):
     if not n:
         return "", dash.no_update
 
     if not all([nom, prenom, pays, niveau, domaine]):
-        return dbc.Alert(
-            "⚠️ Tous les champs sont requis.",
-            color="danger"
-        ), dash.no_update
+        return dbc.Alert("⚠️ Tous les champs sont requis.", color="danger"), dash.no_update
 
     try:
-        # Étape 1 : modifier le profil
-        rep = requests.put(
-            f"{API_URL}/api/users/{user_id}",
-            json={
-                "nom":           nom,
-                "prenom":        prenom,
-                "pays":          pays,
-                "niveau_etudes": niveau,
-                "domaine":       domaine,
-                "objectif":      objectif,
-                "langue":        langue,
-            },
-            timeout=30
-        )
-        data = rep.json()
+        data = api_put(f"/api/users/{user_id}", {
+            "nom": nom,
+            "prenom": prenom,
+            "pays": pays,
+            "niveau_etudes": niveau,
+            "domaine": domaine,
+            "objectif": objectif,
+            "langue": langue,
+        })
 
-        if not data['succes']:
-            return dbc.Alert(f"❌ {data['erreur']}", color="danger"), dash.no_update
+        if not data.get("succes"):
+            return dbc.Alert(f"❌ {data.get('erreur', 'Erreur inconnue')}", color="danger"), dash.no_update
 
-        # Étape 2 : nouvelles recommendations avec le profil modifié
-        rep_reco = requests.get(
-            f"{API_URL}/api/recommendations/{user_id}",
-            timeout=30
-        )
-        data_reco = rep_reco.json()
+        data_reco = api_get(f"/api/recommendations/{user_id}")
 
-        # Étape 3 : afficher les résultats
+        if not data_reco.get("succes"):
+            return dbc.Alert("Erreur lors de la mise à jour des recommandations.", color="warning"), dash.no_update
+
         return "", page_resultats(
-            data_reco['utilisateur'],
-            data_reco['formations'],
-            data_reco['bourses'],
-            data_reco['texte_profil']
+            data_reco["utilisateur"],
+            data_reco["formations"],
+            data_reco["bourses"],
+            data_reco["texte_profil"]
         )
-
-    except requests.exceptions.ConnectionError:
-        return dbc.Alert(
-            "❌ Impossible de joindre l'API. "
-            "Vérifiez que api.py tourne sur le port 5001.",
-            color="danger"
-        ), dash.no_update
 
     except Exception as e:
-        return dbc.Alert(f"Erreur : {str(e)}", color="danger"), dash.no_update
+        return erreur_api_message(e), dash.no_update
 
 
 # ═════════════════════════════════════════════════════════
 # DÉMARRAGE
 # ═════════════════════════════════════════════════════════
-if __name__ == '__main__':
+if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    print("=" * 50)
+    print(" EduReco — Dashboard Dash")
+    print("=" * 50)
+    print(f" Dashboard → http://127.0.0.1:{port}")
+    print(f" API       → {API_URL}")
+    print("=" * 50)
+    app.run(debug=False, host="0.0.0.0", port=port)
