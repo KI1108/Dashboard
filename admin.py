@@ -1,31 +1,25 @@
-# admin.py
-# ============================================================
-# EduReco — Admin Dashboard (version claire blanc + bleu)
-# Déploiement friendly pour Render
-# ============================================================
 
 import os
-import dash
-from dash import html, dcc, dash_table, Input, Output
-import dash_bootstrap_components as dbc
-import plotly.express as px
-import plotly.graph_objects as go
+import time
 import requests
+import dash
+from dash import html, dcc, dash_table, Input, Output, State, no_update
+import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
 
-# ─────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────
-API_URL = os.getenv("API_URL", "http://127.0.0.1:5001")
+API_URL = os.getenv("API_URL", "").rstrip("/")
+REQUEST_TIMEOUT = 20
+CACHE_TTL_SECONDS = 60
 
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    suppress_callback_exceptions=True
+    suppress_callback_exceptions=True,
+    prevent_initial_callbacks=False,
 )
 server = app.server
 app.title = "EduReco — Admin"
 
-# Palette claire
 COLORS = {
     "bg": "#f5f8fc",
     "card": "#ffffff",
@@ -41,9 +35,6 @@ COLORS = {
     "info": "#5bc0de",
 }
 
-# ─────────────────────────────────────────────────────────
-# STYLES
-# ─────────────────────────────────────────────────────────
 GLOBAL_STYLE = {
     "backgroundColor": COLORS["bg"],
     "minHeight": "100vh",
@@ -68,60 +59,110 @@ SECTION_TITLE_STYLE = {
     "marginBottom": "18px"
 }
 
-# ─────────────────────────────────────────────────────────
-# APPELS API
-# ─────────────────────────────────────────────────────────
+
+def api_down_message(details=""):
+    base = "API inaccessible."
+    if API_URL:
+        base += f" API utilisée : {API_URL}"
+    else:
+        base += " API_URL non configurée dans les variables du Space."
+    if details:
+        base += f" | Détail : {details}"
+    return dbc.Alert(
+        [html.Strong(base)],
+        color="danger",
+        style={"borderRadius": "12px"}
+    )
+
+
+def build_url(path: str) -> str:
+    return f"{API_URL}{path}"
+
+
+def safe_get_json(url, timeout=REQUEST_TIMEOUT, retries=2):
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            r = requests.get(url, timeout=timeout)
+            if r.status_code == 429:
+                retry_after = r.headers.get("Retry-After")
+                wait_seconds = int(retry_after) if retry_after and retry_after.isdigit() else min(2 ** attempt, 8)
+                time.sleep(wait_seconds)
+                last_error = requests.HTTPError(f"429 Too Many Requests for url: {url}")
+                continue
+            r.raise_for_status()
+            return r.json()
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
+            last_error = e
+            if attempt < retries:
+                time.sleep(min(2 ** attempt, 4))
+                continue
+            raise
+    raise last_error
+
+
+def normalize_api_response(data, key):
+    if isinstance(data, dict):
+        if data.get("succes") is True:
+            return data.get(key)
+        if key in data:
+            return data.get(key)
+    return None
+
+
 def fetch_stats():
+    if not API_URL:
+        return None, "API_URL manquante"
     try:
-        r = requests.get(f"{API_URL}/api/admin/stats", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("stats", {}) if data.get("succes") else {}
-    except Exception:
-        return {}
+        data = safe_get_json(build_url("/api/admin/stats"))
+        stats = normalize_api_response(data, "stats")
+        if stats is not None:
+            return stats, None
+        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+    except requests.exceptions.Timeout:
+        return None, "Timeout API"
+    except Exception as e:
+        return None, str(e)
 
 
 def fetch_users():
+    if not API_URL:
+        return None, "API_URL manquante"
     try:
-        r = requests.get(f"{API_URL}/api/admin/users", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("users", []) if data.get("succes") else []
-    except Exception:
-        return []
+        data = safe_get_json(build_url("/api/admin/users"))
+        users = normalize_api_response(data, "users")
+        if users is not None:
+            return users, None
+        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+    except requests.exceptions.Timeout:
+        return None, "Timeout API"
+    except Exception as e:
+        return None, str(e)
 
 
 def fetch_recos():
+    if not API_URL:
+        return None, "API_URL manquante"
     try:
-        r = requests.get(f"{API_URL}/api/admin/recommendations", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("recommendations", []) if data.get("succes") else []
-    except Exception:
-        return []
+        data = safe_get_json(build_url("/api/admin/recommendations"))
+        recos = normalize_api_response(data, "recommendations")
+        if recos is not None:
+            return recos, None
+        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+    except requests.exceptions.Timeout:
+        return None, "Timeout API"
+    except Exception as e:
+        return None, str(e)
 
 
-# ─────────────────────────────────────────────────────────
-# COMPOSANTS
-# ─────────────────────────────────────────────────────────
 def kpi_card(titre, valeur, icone, couleur):
     return dbc.Card(
         dbc.CardBody([
             dbc.Row([
+                dbc.Col([html.Div(icone, style={"fontSize": "2rem"})], width=3),
                 dbc.Col([
-                    html.Div(icone, style={"fontSize": "2rem"}),
-                ], width=3),
-                dbc.Col([
-                    html.H3(
-                        str(valeur),
-                        className="mb-1 fw-bold",
-                        style={"color": couleur}
-                    ),
-                    html.P(
-                        titre,
-                        className="mb-0",
-                        style={"color": COLORS["muted"], "fontSize": "0.95rem"}
-                    )
+                    html.H3(str(valeur), className="mb-1 fw-bold", style={"color": couleur}),
+                    html.P(titre, className="mb-0", style={"color": COLORS["muted"], "fontSize": "0.95rem"})
                 ], width=9)
             ], align="center")
         ]),
@@ -130,27 +171,12 @@ def kpi_card(titre, valeur, icone, couleur):
     )
 
 
-def alerte_api_down():
-    return dbc.Alert(
-        [
-            html.Strong("API inaccessible. "),
-            "Vérifie que api.py tourne correctement ou que API_URL est bien configuré."
-        ],
-        color="danger",
-        style={"borderRadius": "12px"}
-    )
-
-
 def top_banner():
     return dbc.Card(
         dbc.CardBody([
             dbc.Row([
                 dbc.Col([
-                    html.H2(
-                        "Bonjour Admin 👋",
-                        className="fw-bold mb-2",
-                        style={"color": "#26435f"}
-                    ),
+                    html.H2("Bonjour Admin 👋", className="fw-bold mb-2", style={"color": "#26435f"}),
                     html.P(
                         "Supervision de la plateforme EduReco, suivi des utilisateurs et des recommandations.",
                         className="mb-0",
@@ -162,12 +188,7 @@ def top_banner():
                         "🔄 Actualiser",
                         id="btn-refresh-top",
                         color="light",
-                        outline=False,
-                        style={
-                            "borderRadius": "10px",
-                            "fontWeight": "600",
-                            "color": COLORS["primary"]
-                        }
+                        style={"borderRadius": "10px", "fontWeight": "600", "color": COLORS["primary"]}
                     )
                 ], width=4, className="d-flex justify-content-end align-items-start")
             ])
@@ -182,82 +203,100 @@ def top_banner():
     )
 
 
-# ─────────────────────────────────────────────────────────
-# PAGES
-# ─────────────────────────────────────────────────────────
-def page_dashboard():
-    stats = fetch_stats()
+def make_empty_figure(title, annotation="Aucune donnée"):
+    fig = go.Figure()
+    fig.add_annotation(
+        text=annotation,
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font={"size": 16, "color": COLORS["muted"]}
+    )
+    fig.update_layout(
+        title=title,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        font_color=COLORS["text"],
+        height=320,
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        margin=dict(l=20, r=20, t=50, b=20)
+    )
+    return fig
 
-    if not stats:
-        return alerte_api_down()
 
-    kpis = dbc.Row([
-        dbc.Col(kpi_card("Utilisateurs inscrits", stats.get("total_users", 0), "👤", COLORS["primary"]), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Recommendations générées", stats.get("total_recos", 0), "🤖", "#22a06b"), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Formations recommandées", stats.get("nb_formations_reco", 0), "🎓", "#1f9bd1"), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Bourses recommandées", stats.get("nb_bourses_reco", 0), "💰", "#e0a100"), md=3, className="mb-3"),
-    ], className="mb-2")
-
-    par_domaine = stats.get("par_domaine", {})
-    fig_domaine = px.pie(
-        names=list(par_domaine.keys()),
-        values=list(par_domaine.values()),
-        title="Répartition par domaine",
+def fig_pie_from_dict(data_dict, title):
+    if not data_dict:
+        return make_empty_figure(title)
+    labels = list(data_dict.keys())
+    values = list(data_dict.values())
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
         hole=0.45,
-        color_discrete_sequence=["#3f6df6", "#6ea8fe", "#9ec5fe", "#bfd7ff", "#dbeafe"]
-    )
-    fig_domaine.update_layout(
+        marker=dict(colors=["#3f6df6", "#6ea8fe", "#9ec5fe", "#bfd7ff", "#dbeafe", "#eaf2ff"])
+    )])
+    fig.update_layout(
+        title=title,
         paper_bgcolor="white",
         plot_bgcolor="white",
         font_color=COLORS["text"],
-        title_font_color=COLORS["text"],
-        legend=dict(orientation="v"),
         margin=dict(l=20, r=20, t=50, b=20)
     )
+    return fig
 
-    par_niveau = stats.get("par_niveau", {})
-    fig_niveau = px.bar(
-        x=list(par_niveau.keys()),
-        y=list(par_niveau.values()),
-        title="Répartition par niveau d'études",
-        labels={"x": "Niveau", "y": "Nb utilisateurs"},
-        color=list(par_niveau.values()),
-        color_continuous_scale=["#dbeafe", "#93c5fd", "#60a5fa", "#3b82f6"]
-    )
-    fig_niveau.update_layout(
+
+def fig_bar_vertical(data_dict, title, x_label, y_label):
+    if not data_dict:
+        return make_empty_figure(title)
+    x_vals = list(data_dict.keys())
+    y_vals = list(data_dict.values())
+    fig = go.Figure(data=[go.Bar(
+        x=x_vals,
+        y=y_vals,
+        marker_color="#3f6df6"
+    )])
+    fig.update_layout(
+        title=title,
         paper_bgcolor="white",
         plot_bgcolor="white",
         font_color=COLORS["text"],
-        title_font_color=COLORS["text"],
         showlegend=False,
-        coloraxis_showscale=False,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
         margin=dict(l=20, r=20, t=50, b=20)
     )
+    return fig
 
-    par_pays = stats.get("par_pays", {})
-    fig_pays = px.bar(
-        x=list(par_pays.values()),
-        y=list(par_pays.keys()),
+
+def fig_bar_horizontal(data_dict, title, x_label, y_label):
+    if not data_dict:
+        return make_empty_figure(title)
+    x_vals = list(data_dict.values())
+    y_vals = list(data_dict.keys())
+    fig = go.Figure(data=[go.Bar(
+        x=x_vals,
+        y=y_vals,
         orientation="h",
-        title="Répartition par pays",
-        labels={"x": "Nb utilisateurs", "y": "Pays"},
-        color=list(par_pays.values()),
-        color_continuous_scale=["#dbeafe", "#93c5fd", "#60a5fa", "#3b82f6"]
-    )
-    fig_pays.update_layout(
+        marker_color="#60a5fa"
+    )])
+    fig.update_layout(
+        title=title,
         paper_bgcolor="white",
         plot_bgcolor="white",
         font_color=COLORS["text"],
-        title_font_color=COLORS["text"],
         showlegend=False,
-        coloraxis_showscale=False,
+        xaxis_title=x_label,
+        yaxis_title=y_label,
         margin=dict(l=20, r=20, t=50, b=20)
     )
+    return fig
 
-    score_moyen = stats.get("score_moyen", 0)
-    fig_gauge = go.Figure(go.Indicator(
+
+def fig_gauge(score_moyen):
+    fig = go.Figure(go.Indicator(
         mode="gauge+number",
-        value=score_moyen,
+        value=float(score_moyen or 0),
         title={"text": "Score NLP moyen (%)", "font": {"color": COLORS["text"]}},
         gauge={
             "axis": {"range": [0, 100], "tickcolor": COLORS["text"]},
@@ -275,33 +314,32 @@ def page_dashboard():
         },
         number={"suffix": "%", "font": {"color": COLORS["text"]}}
     ))
-    fig_gauge.update_layout(
+    fig.update_layout(
         paper_bgcolor="white",
         font_color=COLORS["text"],
         height=260,
         margin=dict(l=20, r=20, t=60, b=20)
     )
+    return fig
 
+
+def dashboard_layout_shell():
     return html.Div([
         html.H4("📊 Tableau de bord", style=SECTION_TITLE_STYLE),
-        kpis,
+        html.Div(id="dashboard-alert"),
+        html.Div(id="dashboard-kpis"),
         dbc.Row([
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_domaine)), style=CARD_STYLE), md=5, className="mb-4"),
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_niveau)), style=CARD_STYLE), md=4, className="mb-4"),
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_gauge)), style=CARD_STYLE), md=3, className="mb-4"),
+            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="fig-domaine")), style=CARD_STYLE), md=5, className="mb-4"),
+            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="fig-niveau")), style=CARD_STYLE), md=4, className="mb-4"),
+            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="fig-gauge")), style=CARD_STYLE), md=3, className="mb-4"),
         ]),
         dbc.Row([
-            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(figure=fig_pays)), style=CARD_STYLE), md=6, className="mb-4"),
+            dbc.Col(dbc.Card(dbc.CardBody(dcc.Graph(id="fig-pays")), style=CARD_STYLE), md=6, className="mb-4"),
         ])
     ])
 
 
-def page_utilisateurs():
-    users = fetch_users()
-
-    if not users:
-        return alerte_api_down()
-
+def users_layout_shell():
     colonnes = [
         {"name": "ID", "id": "id"},
         {"name": "Nom", "id": "nom"},
@@ -313,13 +351,14 @@ def page_utilisateurs():
         {"name": "Objectif", "id": "objectif"},
         {"name": "Créé le", "id": "created_at"},
     ]
-
     return html.Div([
-        html.H4(f"👤 Utilisateurs — {len(users)} inscrits", style=SECTION_TITLE_STYLE),
+        html.H4(id="users-title", children="👤 Utilisateurs", style=SECTION_TITLE_STYLE),
+        html.Div(id="users-alert"),
         dbc.Card(
             dbc.CardBody([
                 dash_table.DataTable(
-                    data=users,
+                    id="users-table",
+                    data=[],
                     columns=colonnes,
                     page_size=15,
                     filter_action="native",
@@ -361,15 +400,7 @@ def page_utilisateurs():
     ])
 
 
-def page_recommendations():
-    recos = fetch_recos()
-
-    if not recos:
-        return alerte_api_down()
-
-    nb_formations = sum(1 for r in recos if r.get("type_item") == "formation")
-    nb_bourses = sum(1 for r in recos if r.get("type_item") == "bourse")
-
+def recos_layout_shell():
     colonnes = [
         {"name": "ID", "id": "id"},
         {"name": "User ID", "id": "user_id"},
@@ -378,37 +409,18 @@ def page_recommendations():
         {"name": "Score (%)", "id": "score"},
         {"name": "Raison", "id": "raisons"},
     ]
-
     return html.Div([
-        html.H4(f"🤖 Recommendations — {len(recos)} générées", style=SECTION_TITLE_STYLE),
-
+        html.H4(id="recos-title", children="🤖 Recommendations", style=SECTION_TITLE_STYLE),
+        html.Div(id="recos-alert"),
         dbc.Row([
-            dbc.Col(
-                dbc.Card(
-                    dbc.CardBody([
-                        html.H5(str(nb_formations), className="fw-bold mb-1", style={"color": COLORS["primary"]}),
-                        html.Div("🎓 Formations", style={"color": COLORS["muted"]})
-                    ]),
-                    style={**CARD_STYLE, "backgroundColor": "#f2f7ff"}
-                ),
-                md=3, className="mb-3"
-            ),
-            dbc.Col(
-                dbc.Card(
-                    dbc.CardBody([
-                        html.H5(str(nb_bourses), className="fw-bold mb-1", style={"color": "#d4a017"}),
-                        html.Div("💰 Bourses", style={"color": COLORS["muted"]})
-                    ]),
-                    style={**CARD_STYLE, "backgroundColor": "#fffaf0"}
-                ),
-                md=3, className="mb-3"
-            ),
+            dbc.Col(html.Div(id="recos-formations-card"), md=3, className="mb-3"),
+            dbc.Col(html.Div(id="recos-bourses-card"), md=3, className="mb-3"),
         ]),
-
         dbc.Card(
             dbc.CardBody([
                 dash_table.DataTable(
-                    data=recos,
+                    id="recos-table",
+                    data=[],
                     columns=colonnes,
                     page_size=20,
                     filter_action="native",
@@ -440,18 +452,12 @@ def page_recommendations():
                     style_data_conditional=[
                         {"if": {"row_index": "odd"}, "backgroundColor": "#f9fbfe"},
                         {
-                            "if": {
-                                "filter_query": "{type_item} = 'formation'",
-                                "column_id": "type_item"
-                            },
+                            "if": {"filter_query": "{type_item} = 'formation'", "column_id": "type_item"},
                             "color": "#1f73d8",
                             "fontWeight": "bold"
                         },
                         {
-                            "if": {
-                                "filter_query": "{type_item} = 'bourse'",
-                                "column_id": "type_item"
-                            },
+                            "if": {"filter_query": "{type_item} = 'bourse'", "column_id": "type_item"},
                             "color": "#c69214",
                             "fontWeight": "bold"
                         },
@@ -468,19 +474,36 @@ def page_recommendations():
     ])
 
 
-# ─────────────────────────────────────────────────────────
-# LAYOUT
-# ─────────────────────────────────────────────────────────
+def loading_shell():
+    return dcc.Loading(
+        type="default",
+        children=html.Div(
+            "Chargement des données...",
+            style={
+                "padding": "24px",
+                "backgroundColor": "white",
+                "border": f"1px solid {COLORS['border']}",
+                "borderRadius": "16px",
+                "color": COLORS["muted"]
+            }
+        )
+    )
+
+
 app.layout = html.Div([
+    dcc.Store(id="current-page", data="dashboard"),
+    dcc.Store(id="stats-store"),
+    dcc.Store(id="users-store"),
+    dcc.Store(id="recos-store"),
+    dcc.Store(id="error-store"),
+    dcc.Store(id="meta-store", data={"last_refresh": 0}),
+    dcc.Interval(id="startup-trigger", interval=400, n_intervals=0, max_intervals=1),
+
     dbc.Navbar(
         dbc.Container([
             html.Div(
                 "🎓 EduReco — Administration",
-                style={
-                    "color": "white",
-                    "fontWeight": "700",
-                    "fontSize": "1.35rem"
-                }
+                style={"color": "white", "fontWeight": "700", "fontSize": "1.35rem"}
             )
         ], fluid=True),
         style={
@@ -495,33 +518,12 @@ app.layout = html.Div([
 
     dbc.Container([
         top_banner(),
-
         dbc.Row([
             dbc.Col([
                 dbc.ButtonGroup([
-                    dbc.Button(
-                        "📊 Tableau de bord",
-                        id="btn-dashboard",
-                        color="primary",
-                        n_clicks=0,
-                        style={"fontWeight": "600", "borderRadius": "10px"}
-                    ),
-                    dbc.Button(
-                        "👤 Utilisateurs",
-                        id="btn-users",
-                        color="primary",
-                        outline=True,
-                        n_clicks=0,
-                        style={"fontWeight": "600", "borderRadius": "10px"}
-                    ),
-                    dbc.Button(
-                        "🤖 Recommendations",
-                        id="btn-recos",
-                        color="primary",
-                        outline=True,
-                        n_clicks=0,
-                        style={"fontWeight": "600", "borderRadius": "10px"}
-                    ),
+                    dbc.Button("📊 Tableau de bord", id="btn-dashboard", color="primary", n_clicks=0, style={"fontWeight": "600", "borderRadius": "10px"}),
+                    dbc.Button("👤 Utilisateurs", id="btn-users", color="primary", outline=True, n_clicks=0, style={"fontWeight": "600", "borderRadius": "10px"}),
+                    dbc.Button("🤖 Recommendations", id="btn-recos", color="primary", outline=True, n_clicks=0, style={"fontWeight": "600", "borderRadius": "10px"}),
                     dbc.Button(
                         "🔄 Rafraîchir",
                         id="btn-refresh",
@@ -539,49 +541,171 @@ app.layout = html.Div([
             ])
         ], className="mb-4"),
 
-        html.Div(id="admin-contenu", children=page_dashboard())
+        html.Div(id="admin-contenu", children=loading_shell())
     ], fluid=True)
 ], style=GLOBAL_STYLE)
 
 
-# ─────────────────────────────────────────────────────────
-# CALLBACK
-# ─────────────────────────────────────────────────────────
 @app.callback(
-    Output("admin-contenu", "children"),
-    [
-        Input("btn-dashboard", "n_clicks"),
-        Input("btn-users", "n_clicks"),
-        Input("btn-recos", "n_clicks"),
-        Input("btn-refresh", "n_clicks"),
-        Input("btn-refresh-top", "n_clicks"),
-    ],
+    Output("current-page", "data"),
+    Input("btn-dashboard", "n_clicks"),
+    Input("btn-users", "n_clicks"),
+    Input("btn-recos", "n_clicks"),
     prevent_initial_call=True
 )
-def changer_page(n_dashboard, n_users, n_recos, n_refresh, n_refresh_top):
+def set_current_page(n_dashboard, n_users, n_recos):
     ctx = dash.callback_context
     if not ctx.triggered:
-        return page_dashboard()
-
+        return no_update
     bouton_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
     if bouton_id == "btn-users":
-        return page_utilisateurs()
-    elif bouton_id == "btn-recos":
-        return page_recommendations()
-    else:
-        return page_dashboard()
+        return "users"
+    if bouton_id == "btn-recos":
+        return "recos"
+    return "dashboard"
 
 
-# ─────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────
+@app.callback(
+    Output("admin-contenu", "children"),
+    Input("current-page", "data"),
+)
+def render_page(page):
+    if page == "users":
+        return users_layout_shell()
+    if page == "recos":
+        return recos_layout_shell()
+    return dashboard_layout_shell()
+
+
+@app.callback(
+    Output("stats-store", "data"),
+    Output("users-store", "data"),
+    Output("recos-store", "data"),
+    Output("error-store", "data"),
+    Output("meta-store", "data"),
+    Input("startup-trigger", "n_intervals"),
+    Input("btn-refresh", "n_clicks"),
+    Input("btn-refresh-top", "n_clicks"),
+    State("meta-store", "data"),
+    prevent_initial_call=False
+)
+def load_all_data(n_startup, n_refresh, n_refresh_top, meta):
+    now = int(time.time())
+    meta = meta or {"last_refresh": 0}
+    last_refresh = int(meta.get("last_refresh", 0))
+
+    if now - last_refresh < CACHE_TTL_SECONDS and last_refresh != 0:
+        return no_update, no_update, no_update, no_update, no_update
+
+    stats, err_stats = fetch_stats()
+    users, err_users = fetch_users()
+    recos, err_recos = fetch_recos()
+
+    errors = {
+        "stats": err_stats,
+        "users": err_users,
+        "recos": err_recos
+    }
+
+    return stats, users, recos, errors, {"last_refresh": now}
+
+
+@app.callback(
+    Output("dashboard-alert", "children"),
+    Output("dashboard-kpis", "children"),
+    Output("fig-domaine", "figure"),
+    Output("fig-niveau", "figure"),
+    Output("fig-pays", "figure"),
+    Output("fig-gauge", "figure"),
+    Input("stats-store", "data"),
+    Input("error-store", "data"),
+)
+def update_dashboard(stats, errors):
+    err = (errors or {}).get("stats")
+    if not stats:
+        return (
+            api_down_message(err or "Aucune donnée de statistiques."),
+            html.Div(),
+            make_empty_figure("Répartition par domaine"),
+            make_empty_figure("Répartition par niveau d'études"),
+            make_empty_figure("Répartition par pays"),
+            fig_gauge(0),
+        )
+
+    kpis = dbc.Row([
+        dbc.Col(kpi_card("Utilisateurs inscrits", stats.get("total_users", 0), "👤", COLORS["primary"]), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Recommendations générées", stats.get("total_recos", 0), "🤖", "#22a06b"), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Formations recommandées", stats.get("nb_formations_reco", 0), "🎓", "#1f9bd1"), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Bourses recommandées", stats.get("nb_bourses_reco", 0), "💰", "#e0a100"), md=3, className="mb-3"),
+    ], className="mb-2")
+
+    return (
+        html.Div(),
+        kpis,
+        fig_pie_from_dict(stats.get("par_domaine", {}), "Répartition par domaine"),
+        fig_bar_vertical(stats.get("par_niveau", {}), "Répartition par niveau d'études", "Niveau", "Nb utilisateurs"),
+        fig_bar_horizontal(stats.get("par_pays", {}), "Répartition par pays", "Nb utilisateurs", "Pays"),
+        fig_gauge(stats.get("score_moyen", 0)),
+    )
+
+
+@app.callback(
+    Output("users-title", "children"),
+    Output("users-alert", "children"),
+    Output("users-table", "data"),
+    Input("users-store", "data"),
+    Input("error-store", "data"),
+)
+def update_users(users, errors):
+    err = (errors or {}).get("users")
+    if users is None:
+        return "👤 Utilisateurs", api_down_message(err or "Aucune donnée utilisateur."), []
+    return f"👤 Utilisateurs — {len(users)} inscrits", html.Div(), users
+
+
+@app.callback(
+    Output("recos-title", "children"),
+    Output("recos-alert", "children"),
+    Output("recos-formations-card", "children"),
+    Output("recos-bourses-card", "children"),
+    Output("recos-table", "data"),
+    Input("recos-store", "data"),
+    Input("error-store", "data"),
+)
+def update_recos(recos, errors):
+    err = (errors or {}).get("recos")
+    if recos is None:
+        empty_card_1 = dbc.Card(dbc.CardBody([html.H5("0", className="fw-bold mb-1"), html.Div("🎓 Formations")]), style={**CARD_STYLE, "backgroundColor": "#f2f7ff"})
+        empty_card_2 = dbc.Card(dbc.CardBody([html.H5("0", className="fw-bold mb-1"), html.Div("💰 Bourses")]), style={**CARD_STYLE, "backgroundColor": "#fffaf0"})
+        return "🤖 Recommendations", api_down_message(err or "Aucune donnée de recommandations."), empty_card_1, empty_card_2, []
+
+    nb_formations = sum(1 for r in recos if r.get("type_item") == "formation")
+    nb_bourses = sum(1 for r in recos if r.get("type_item") == "bourse")
+
+    formation_card = dbc.Card(
+        dbc.CardBody([
+            html.H5(str(nb_formations), className="fw-bold mb-1", style={"color": COLORS["primary"]}),
+            html.Div("🎓 Formations", style={"color": COLORS["muted"]})
+        ]),
+        style={**CARD_STYLE, "backgroundColor": "#f2f7ff"}
+    )
+    bourse_card = dbc.Card(
+        dbc.CardBody([
+            html.H5(str(nb_bourses), className="fw-bold mb-1", style={"color": "#d4a017"}),
+            html.Div("💰 Bourses", style={"color": COLORS["muted"]})
+        ]),
+        style={**CARD_STYLE, "backgroundColor": "#fffaf0"}
+    )
+
+    return f"🤖 Recommendations — {len(recos)} générées", html.Div(), formation_card, bourse_card, recos
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5002))
+    port = int(os.environ.get("PORT", 7860))
     print("=" * 50)
     print(" EduReco — Admin Dashboard")
     print("=" * 50)
-    print(f" Admin → http://127.0.0.1:{port}")
-    print(f" API   → {API_URL}")
+    print(f" API   → {API_URL or 'NON CONFIGURÉE'}")
+    print(f" Admin → http://0.0.0.0:{port}")
     print("=" * 50)
     app.run(debug=False, host="0.0.0.0", port=port)
