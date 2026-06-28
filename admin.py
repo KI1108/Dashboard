@@ -114,17 +114,23 @@ def normalize_api_response(data, key):
       - {"success": true, "stats": {...}}
       - {"stats": {...}}                       (sans flag de succès)
       - {"success": true, "data": {...}}       (payload sous "data"/"result")
-      - {"total_users": ..., "par_domaine": {...}}  (payload directement à la racine)
-      - {"users": {"items": [...]}} / {"items": [...]}
+      - {"succes": true, "total_utilisateurs": ..., "repartition_domaine": {...}}
+        (payload à plat, directement aux côtés du flag de succès)
+      - {"succes": true, "utilisateurs": [...]} (une seule liste à côté du flag)
     """
     if not isinstance(data, dict):
         print(f"[normalize_api_response] Réponse inattendue (pas un dict) pour '{key}': {data!r}")
         return None
 
-    # 1) Flag de succès explicite (FR ou EN) qui serait False/erreur -> on arrête là
-    for flag in ("succes", "success", "ok"):
-        if flag in data and data.get(flag) is False:
-            print(f"[normalize_api_response] Flag '{flag}' = False pour '{key}': {data!r}")
+    flags_succes = ("succes", "success", "ok")
+    flag_present = next((f for f in flags_succes if f in data), None)
+
+    # 1) Flag de succès explicite qui vaudrait False -> on arrête là (erreur API)
+    if flag_present is not None:
+        valeur = data.get(flag_present)
+        est_ok = valeur is True or (isinstance(valeur, str) and valeur.lower() in ("ok", "true", "success", "succes"))
+        if not est_ok:
+            print(f"[normalize_api_response] Flag '{flag_present}' négatif pour '{key}': {data!r}")
             return None
 
     # 2) La clé attendue est présente directement
@@ -135,16 +141,20 @@ def normalize_api_response(data, key):
     for alt in ("data", "result", "payload"):
         if isinstance(data.get(alt), dict) and key in data[alt]:
             return data[alt][key]
-        if isinstance(data.get(alt), (dict, list)) and alt == "data":
-            # fallback: data["data"] est déjà le payload recherché
+        if alt in data and isinstance(data.get(alt), (dict, list)):
             return data[alt]
 
-    # 4) Aucune enveloppe : le payload est directement à la racine
-    if key == "stats" and any(k in data for k in ("total_users", "par_domaine", "par_niveau", "score_moyen")):
-        return data
-    if key in ("users", "recommendations"):
-        if isinstance(data.get("items"), list):
-            return data["items"]
+    # 4) Pas d'enveloppe reconnue : le payload est à plat dans le dict
+    #    (on retire juste le flag de succès / message d'erreur éventuel)
+    reste = {k: v for k, v in data.items() if k not in flags_succes and k not in ("erreur", "error", "message")}
+    if reste:
+        # S'il ne reste qu'une seule clé contenant une liste -> c'est elle qu'on veut
+        if len(reste) == 1:
+            seule_valeur = next(iter(reste.values()))
+            if isinstance(seule_valeur, list):
+                return seule_valeur
+        # Sinon, si on cherche un dict de stats, le reste à plat EST le payload
+        return reste
 
     print(f"[normalize_api_response] Aucun format reconnu pour '{key}'. Clés reçues: {list(data.keys())}")
     return None
@@ -158,6 +168,14 @@ def extract_error_message(data):
             return str(data[champ])
     # Aide au diagnostic : montre les clés reçues si aucun message d'erreur explicite
     return f"Réponse API invalide (clés reçues : {list(data.keys())})"
+
+
+def pick(d, *keys, default=None):
+    """Renvoie la première clé présente (et non-None) parmi plusieurs noms possibles."""
+    for k in keys:
+        if isinstance(d, dict) and d.get(k) is not None:
+            return d.get(k)
+    return default
 
 
 def fetch_stats():
@@ -683,19 +701,19 @@ def update_dashboard(stats, errors):
         )
 
     kpis = dbc.Row([
-        dbc.Col(kpi_card("Utilisateurs inscrits", stats.get("total_users", 0), "👤", COLORS["primary"]), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Recommendations générées", stats.get("total_recos", 0), "🤖", "#22a06b"), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Formations recommandées", stats.get("nb_formations_reco", 0), "🎓", "#1f9bd1"), md=3, className="mb-3"),
-        dbc.Col(kpi_card("Bourses recommandées", stats.get("nb_bourses_reco", 0), "💰", "#e0a100"), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Utilisateurs inscrits", pick(stats, "total_users", "total_utilisateurs", default=0), "👤", COLORS["primary"]), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Recommendations générées", pick(stats, "total_recos", "total_recommendations", default=0), "🤖", "#22a06b"), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Formations recommandées", pick(stats, "nb_formations_reco", "total_formations_recommandees", default=0), "🎓", "#1f9bd1"), md=3, className="mb-3"),
+        dbc.Col(kpi_card("Bourses recommandées", pick(stats, "nb_bourses_reco", "total_bourses_recommandees", default=0), "💰", "#e0a100"), md=3, className="mb-3"),
     ], className="mb-2")
 
     return (
         html.Div(),
         kpis,
-        fig_pie_from_dict(stats.get("par_domaine", {}), "Répartition par domaine"),
-        fig_bar_vertical(stats.get("par_niveau", {}), "Répartition par niveau d'études", "Niveau", "Nb utilisateurs"),
-        fig_bar_horizontal(stats.get("par_pays", {}), "Répartition par pays", "Nb utilisateurs", "Pays"),
-        fig_gauge(stats.get("score_moyen", 0)),
+        fig_pie_from_dict(pick(stats, "par_domaine", "repartition_domaine", default={}), "Répartition par domaine"),
+        fig_bar_vertical(pick(stats, "par_niveau", "repartition_niveau", default={}), "Répartition par niveau d'études", "Niveau", "Nb utilisateurs"),
+        fig_bar_horizontal(pick(stats, "par_pays", "repartition_pays", default={}), "Répartition par pays", "Nb utilisateurs", "Pays"),
+        fig_gauge(pick(stats, "score_moyen", "score_nlp_moyen", default=0)),
     )
 
 
