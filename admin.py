@@ -1,4 +1,3 @@
-
 import os
 import time
 import requests
@@ -91,7 +90,14 @@ def safe_get_json(url, timeout=REQUEST_TIMEOUT, retries=2):
                 last_error = requests.HTTPError(f"429 Too Many Requests for url: {url}")
                 continue
             r.raise_for_status()
-            return r.json()
+            try:
+                return r.json()
+            except ValueError:
+                # La réponse n'est pas du JSON (ex: page d'erreur HTML du proxy / Space en veille)
+                extrait = r.text[:200].replace("\n", " ")
+                raise requests.HTTPError(
+                    f"Réponse non-JSON reçue de {url} (content-type={r.headers.get('content-type')}) : {extrait}"
+                )
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.HTTPError) as e:
             last_error = e
             if attempt < retries:
@@ -102,12 +108,56 @@ def safe_get_json(url, timeout=REQUEST_TIMEOUT, retries=2):
 
 
 def normalize_api_response(data, key):
-    if isinstance(data, dict):
-        if data.get("succes") is True:
-            return data.get(key)
-        if key in data:
-            return data.get(key)
+    """
+    Tolère plusieurs formats d'API :
+      - {"succes": true, "stats": {...}}
+      - {"success": true, "stats": {...}}
+      - {"stats": {...}}                       (sans flag de succès)
+      - {"success": true, "data": {...}}       (payload sous "data"/"result")
+      - {"total_users": ..., "par_domaine": {...}}  (payload directement à la racine)
+      - {"users": {"items": [...]}} / {"items": [...]}
+    """
+    if not isinstance(data, dict):
+        print(f"[normalize_api_response] Réponse inattendue (pas un dict) pour '{key}': {data!r}")
+        return None
+
+    # 1) Flag de succès explicite (FR ou EN) qui serait False/erreur -> on arrête là
+    for flag in ("succes", "success", "ok"):
+        if flag in data and data.get(flag) is False:
+            print(f"[normalize_api_response] Flag '{flag}' = False pour '{key}': {data!r}")
+            return None
+
+    # 2) La clé attendue est présente directement
+    if key in data:
+        return data.get(key)
+
+    # 3) Le payload est rangé sous data / result / payload
+    for alt in ("data", "result", "payload"):
+        if isinstance(data.get(alt), dict) and key in data[alt]:
+            return data[alt][key]
+        if isinstance(data.get(alt), (dict, list)) and alt == "data":
+            # fallback: data["data"] est déjà le payload recherché
+            return data[alt]
+
+    # 4) Aucune enveloppe : le payload est directement à la racine
+    if key == "stats" and any(k in data for k in ("total_users", "par_domaine", "par_niveau", "score_moyen")):
+        return data
+    if key in ("users", "recommendations"):
+        if isinstance(data.get("items"), list):
+            return data["items"]
+
+    print(f"[normalize_api_response] Aucun format reconnu pour '{key}'. Clés reçues: {list(data.keys())}")
     return None
+
+
+def extract_error_message(data):
+    if not isinstance(data, dict):
+        return "Réponse API invalide"
+    for champ in ("erreur", "error", "message", "detail"):
+        if data.get(champ):
+            return str(data[champ])
+    # Aide au diagnostic : montre les clés reçues si aucun message d'erreur explicite
+    return f"Réponse API invalide (clés reçues : {list(data.keys())})"
 
 
 def fetch_stats():
@@ -118,7 +168,7 @@ def fetch_stats():
         stats = normalize_api_response(data, "stats")
         if stats is not None:
             return stats, None
-        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+        return None, extract_error_message(data)
     except requests.exceptions.Timeout:
         return None, "Timeout API"
     except Exception as e:
@@ -133,7 +183,7 @@ def fetch_users():
         users = normalize_api_response(data, "users")
         if users is not None:
             return users, None
-        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+        return None, extract_error_message(data)
     except requests.exceptions.Timeout:
         return None, "Timeout API"
     except Exception as e:
@@ -148,7 +198,7 @@ def fetch_recos():
         recos = normalize_api_response(data, "recommendations")
         if recos is not None:
             return recos, None
-        return None, data.get("erreur", "Réponse API invalide") if isinstance(data, dict) else "Réponse API invalide"
+        return None, extract_error_message(data)
     except requests.exceptions.Timeout:
         return None, "Timeout API"
     except Exception as e:
